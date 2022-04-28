@@ -33,7 +33,7 @@
 //      IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS). October 2018.
 
 #include "utility.h"
-
+//点云数据投影到图片/点云地面点提取/点云分割.聚类.过滤
 class ImageProjection{
 private:
 
@@ -58,7 +58,7 @@ private:
 
     pcl::PointCloud<PointType>::Ptr groundCloud;//地面点云
     pcl::PointCloud<PointType>::Ptr segmentedCloud;//分割后的点云
-    pcl::PointCloud<PointType>::Ptr segmentedCloudPure;//分割后的点云几何
+    pcl::PointCloud<PointType>::Ptr segmentedCloudPure;//分割后的点云几何(赋值强度值)
     pcl::PointCloud<PointType>::Ptr outlierCloud;//分割后的一场点
 
     PointType nanPoint; // fill in fullCloud at each iteration
@@ -359,7 +359,7 @@ public:
                     //标记点的列索引 稍后遮挡
                     segMsg.segmentedCloudColInd[sizeOfSegCloud] = j;
                     // save range info
-                    //保存范围信息
+                    //保存连续点信息(距离)
                     segMsg.segmentedCloudRange[sizeOfSegCloud]  = rangeMat.at<float>(i,j);
                     // save seg cloud
                     segmentedCloud->push_back(fullCloud->points[j + i*Horizon_SCAN]);

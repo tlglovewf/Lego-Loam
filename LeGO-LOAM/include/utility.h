@@ -59,21 +59,23 @@ extern const string fileDirectory = "/tmp/";
 // Using velodyne cloud "ring" channel for image projection (other lidar may have different name for this channel, change "PointXYZIR" below)
 extern const bool useCloudRing = true; // if true, ang_res_y and ang_bottom are not used
 
+#if 0
 // VLP-16
-//extern const int N_SCAN = 16;
-//extern const int Horizon_SCAN = 1800;
-//extern const float ang_res_x = 0.2;
-//extern const float ang_res_y = 2.0;
-//extern const float ang_bottom = 15.0+0.1;
-//extern const int groundScanInd = 7;
-
+extern const int N_SCAN = 16;
+extern const int Horizon_SCAN = 1800;
+extern const float ang_res_x = 0.2;
+extern const float ang_res_y = 2.0;
+extern const float ang_bottom = 15.0+0.1;
+extern const int groundScanInd = 7;
+#else
+//pandarXT-32
 extern const int N_SCAN = 32;               //线束
 extern const int Horizon_SCAN = 2000;       //宽度 360 / 水平分辨率
 extern const float ang_res_x = 0.18;        //水平分辨率
 extern const float ang_res_y = 1.0;         //垂直分辨率
-extern const float ang_bottom = 15.0+0.1;   //用于计算线束号的 底部线束的角度偏移？
-extern const int groundScanInd = 22;        //地面线束号码
-
+extern const float ang_bottom = 30.67;   //用于计算线束号的 底部线束的角度偏移？
+extern const int groundScanInd = 20;        //地面线束号码
+#endif
 // HDL-32E
 // extern const int N_SCAN = 32;
 // extern const int Horizon_SCAN = 1800;

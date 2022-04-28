@@ -230,11 +230,11 @@ public:
 		parameters.relinearizeThreshold = 0.01;
 		parameters.relinearizeSkip = 1;
     	isam = new ISAM2(parameters);
-
+        //发布关键帧位姿
         pubKeyPoses = nh.advertise<sensor_msgs::PointCloud2>("/key_pose_origin", 2);
         pubLaserCloudSurround = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_surround", 2);
         pubOdomAftMapped = nh.advertise<nav_msgs::Odometry> ("/aft_mapped_to_init", 5);
-
+        //线/面特征(不在线面匹配里的)
         subLaserCloudCornerLast = nh.subscribe<sensor_msgs::PointCloud2>("/laser_cloud_corner_last", 2, &mapOptimization::laserCloudCornerLastHandler, this);
         subLaserCloudSurfLast = nh.subscribe<sensor_msgs::PointCloud2>("/laser_cloud_surf_last", 2, &mapOptimization::laserCloudSurfLastHandler, this);
         subOutlierCloudLast = nh.subscribe<sensor_msgs::PointCloud2>("/outlier_cloud_last", 2, &mapOptimization::laserCloudOutlierLastHandler, this);
@@ -957,7 +957,7 @@ public:
 
         if (cloudKeyPoses3D->points.empty() == true)
             return;	
-		
+		//判断是否进行了回环检测
     	if (loopClosureEnableFlag == true){
     	    // only use recent key poses for graph building
                 if (recentCornerCloudKeyFrames.size() < surroundingKeyframeSearchNum){ // queue is not full (the beginning of mapping or a loop is just closed)
@@ -992,13 +992,13 @@ public:
                         recentOutlierCloudKeyFrames.push_back(transformPointCloud(outlierCloudKeyFrames[latestFrameID]));
                     }
                 }
-
+                //点云拼接
                 for (int i = 0; i < recentCornerCloudKeyFrames.size(); ++i){
                     *laserCloudCornerFromMap += *recentCornerCloudKeyFrames[i];
                     *laserCloudSurfFromMap   += *recentSurfCloudKeyFrames[i];
                     *laserCloudSurfFromMap   += *recentOutlierCloudKeyFrames[i];
                 }
-    	}else{
+    	}else{//若没有回环检测
             surroundingKeyPoses->clear();
             surroundingKeyPosesDS->clear();
     	    // extract all the nearby key poses and downsample them
@@ -1095,18 +1095,21 @@ public:
         updatePointAssociateToMapSinCos();
         for (int i = 0; i < laserCloudCornerLastDSNum; i++) {
             pointOri = laserCloudCornerLastDS->points[i];
+            //将选中的点转到map坐标系中
             pointAssociateToMap(&pointOri, &pointSel);
+            //进行5邻域搜索  记录邻域搜索结果的索引  以及关系
             kdtreeCornerFromMap->nearestKSearch(pointSel, 5, pointSearchInd, pointSearchSqDis);
-            
+            //只有当邻域中最远的点距离小于1.0
             if (pointSearchSqDis[4] < 1.0) {
                 float cx = 0, cy = 0, cz = 0;
+                //曲近5个点的平均值
                 for (int j = 0; j < 5; j++) {
                     cx += laserCloudCornerFromMapDS->points[pointSearchInd[j]].x;
                     cy += laserCloudCornerFromMapDS->points[pointSearchInd[j]].y;
                     cz += laserCloudCornerFromMapDS->points[pointSearchInd[j]].z;
                 }
                 cx /= 5; cy /= 5;  cz /= 5;
-
+                //求协方差矩阵
                 float a11 = 0, a12 = 0, a13 = 0, a22 = 0, a23 = 0, a33 = 0;
                 for (int j = 0; j < 5; j++) {
                     float ax = laserCloudCornerFromMapDS->points[pointSearchInd[j]].x - cx;
@@ -1122,9 +1125,12 @@ public:
                 matA1.at<float>(0, 0) = a11; matA1.at<float>(0, 1) = a12; matA1.at<float>(0, 2) = a13;
                 matA1.at<float>(1, 0) = a12; matA1.at<float>(1, 1) = a22; matA1.at<float>(1, 2) = a23;
                 matA1.at<float>(2, 0) = a13; matA1.at<float>(2, 1) = a23; matA1.at<float>(2, 2) = a33;
-
+                //求正交特征值和特征向量
                 cv::eigen(matA1, matD1, matV1);
-
+ 
+                // 边缘：与较大特征值相对应的特征向量代表边缘线的方向（一大两小，大方向）
+                // 以下这一大块是在计算点到边缘的距离，最后通过系数s来判断是否距离很近
+                // 如果距离很近就认为这个点在边缘上，需要放到laserCloudOri中
                 if (matD1.at<float>(0, 0) > 3 * matD1.at<float>(0, 1)) {
 
                     float x0 = pointSel.x;
@@ -1154,16 +1160,22 @@ public:
 
                     float lc = -((x1 - x2)*((x0 - x1)*(z0 - z2) - (x0 - x2)*(z0 - z1)) 
                                + (y1 - y2)*((y0 - y1)*(z0 - z2) - (y0 - y2)*(z0 - z1))) / a012 / l12;
-
+                    // 计算点pointSel到直线的距离
+                    // 这里需要特别说明的是ld2代表的是点pointSel到过点[cx,cy,cz]的方向向量直线的距离
                     float ld2 = a012 / l12;
-
+                    // 如果在最理想的状态的话，ld2应该为0，表示点在直线上
+                    // 最理想状态s=1；
                     float s = 1 - 0.9 * fabs(ld2);
 
                     coeff.x = s * la;
                     coeff.y = s * lb;
                     coeff.z = s * lc;
+                    // intensity本质上构成了一个核函数，ld2越接近于1，增长越慢
+                    // intensity=(1-0.9*ld2)*ld2=ld2-0.9*ld2*ld2
                     coeff.intensity = s * ld2;
-
+                    // 所以就应该认为这个点是边缘点
+                    // s>0.1 也就是要求点到直线的距离ld2要小于1m
+                    // s越大说明ld2越小(离边缘线越近)，这样就说明点pointOri在直线上
                     if (s > 0.1) {
                         laserCloudOri->push_back(pointOri);
                         coeffSel->push_back(coeff);
@@ -1261,21 +1273,43 @@ public:
             float arz = ((crz*srx*sry - cry*srz)*pointOri.x + (-cry*crz-srx*sry*srz)*pointOri.y)*coeff.x
                       + (crx*crz*pointOri.x - crx*srz*pointOri.y) * coeff.y
                       + ((sry*srz + cry*crz*srx)*pointOri.x + (crz*sry-cry*srx*srz)*pointOri.y)*coeff.z;
-
+            /*
+            在求点到直线的距离时，coeff表示的是如下内容
+            [la,lb,lc]表示的是点到直线的垂直连线方向，s是长度
+            coeff.x = s * la;
+            coeff.y = s * lb;
+            coeff.z = s * lc;
+            coeff.intensity = s * ld2;
+            在求点到平面的距离时，coeff表示的是
+            [pa,pb,pc]表示过外点的平面的法向量，s是线的长度
+            coeff.x = s * pa;
+            coeff.y = s * pb;
+            coeff.z = s * pc;
+            coeff.intensity = s * pd2;
+            */
             matA.at<float>(i, 0) = arx;
             matA.at<float>(i, 1) = ary;
             matA.at<float>(i, 2) = arz;
+            // 这部分是雅克比矩阵中距离对平移的偏导
             matA.at<float>(i, 3) = coeff.x;
             matA.at<float>(i, 4) = coeff.y;
             matA.at<float>(i, 5) = coeff.z;
+            // 残差项
             matB.at<float>(i, 0) = -coeff.intensity;
         }
+        // 将矩阵由matA转置生成matAt
+        // 先进行计算，以便于后边调用 cv::solve求解
         cv::transpose(matA, matAt);
         matAtA = matAt * matA;
         matAtB = matAt * matB;
+
+        // 利用高斯牛顿法进行求解，
+        // 高斯牛顿法的原型是J^(T)*J * delta(x) = -J*f(x)
+        // J是雅克比矩阵，这里是A，f(x)是优化目标，这里是-B(符号在给B赋值时候就放进去了)
+        // 通过QR分解的方式，求解matAtA*matX=matAtB，得到解matX
         cv::solve(matAtA, matAtB, matX, cv::DECOMP_QR);
 
-        if (iterCount == 0) {
+        if (iterCount == 0) {//初始化
             cv::Mat matE(1, 6, CV_32F, cv::Scalar::all(0));
             cv::Mat matV(6, 6, CV_32F, cv::Scalar::all(0));
             cv::Mat matV2(6, 6, CV_32F, cv::Scalar::all(0));
@@ -1319,7 +1353,7 @@ public:
                             pow(matX.at<float>(3, 0) * 100, 2) +
                             pow(matX.at<float>(4, 0) * 100, 2) +
                             pow(matX.at<float>(5, 0) * 100, 2));
-
+        // 旋转或者平移量足够小就停止这次迭代过程
         if (deltaR < 0.05 && deltaT < 0.05) {
             return true;
         }
@@ -1327,24 +1361,27 @@ public:
     }
 
     void scan2MapOptimization(){
-
+        // laserCloudCornerFromMapDSNum是extractSurroundingKeyFrames()函数最后降采样得到的coner点云数
+        // laserCloudSurfFromMapDSNum是extractSurroundingKeyFrames()函数降采样得到的surface点云数
         if (laserCloudCornerFromMapDSNum > 10 && laserCloudSurfFromMapDSNum > 100) {
-
+            // laserCloudCornerFromMapDS 与 laserCloudSurfFromMapDS 来源有两种情况
+            // 第一种：来自 recentCornerCloudKeyFrames 此时有回环检测
+            // 第二种：来自 surroundingCornerCloudKeyFrames 此时没有使用回环检测
             kdtreeCornerFromMap->setInputCloud(laserCloudCornerFromMapDS);
             kdtreeSurfFromMap->setInputCloud(laserCloudSurfFromMapDS);
 
             for (int iterCount = 0; iterCount < 10; iterCount++) {
-
+                //最多10次迭代
                 laserCloudOri->clear();
                 coeffSel->clear();
-
+                //线面特征计算距离
                 cornerOptimization(iterCount);
                 surfOptimization(iterCount);
-
+                //LM优化
                 if (LMOptimization(iterCount) == true)
                     break;              
             }
-
+            //更新相关转移矩阵
             transformUpdate();
         }
     }
@@ -1355,7 +1392,7 @@ public:
         currentRobotPosPoint.x = transformAftMapped[3];
         currentRobotPosPoint.y = transformAftMapped[4];
         currentRobotPosPoint.z = transformAftMapped[5];
-
+        //前后帧欧式距离>0.3则认为是新的帧
         bool saveThisKeyFrame = true;
         if (sqrt((previousRobotPosPoint.x-currentRobotPosPoint.x)*(previousRobotPosPoint.x-currentRobotPosPoint.x)
                 +(previousRobotPosPoint.y-currentRobotPosPoint.y)*(previousRobotPosPoint.y-currentRobotPosPoint.y)
@@ -1370,7 +1407,7 @@ public:
 
         previousRobotPosPoint = currentRobotPosPoint;
         /**
-         * update grsam graph
+         * update grsam graph 把当前的 pose 加入到 grsam graph 
          */
         if (cloudKeyPoses3D->points.empty()){
             gtSAMgraph.add(PriorFactor<Pose3>(0, Pose3(Rot3::RzRyRx(transformTobeMapped[2], transformTobeMapped[0], transformTobeMapped[1]),
@@ -1392,6 +1429,16 @@ public:
         /**
          * update iSAM
          */
+          // gtsam::ISAM2::update函数原型:
+        // ISAM2Result gtsam::ISAM2::update	(	const NonlinearFactorGraph & 	newFactors = NonlinearFactorGraph(),
+        // const Values & 	newTheta = Values(),
+        // const std::vector< size_t > & 	removeFactorIndices = std::vector<size_t>(),
+        // const boost::optional< FastMap< Key, int > > & 	constrainedKeys = boost::none,
+        // const boost::optional< FastList< Key > > & 	noRelinKeys = boost::none,
+        // const boost::optional< FastList< Key > > & 	extraReelimKeys = boost::none,
+        // bool 	force_relinearize = false )	
+        // gtSAMgraph是新加到系统中的因子
+        // initialEstimate是加到系统中的新变量的初始点
         isam->update(gtSAMgraph, initialEstimate);
         isam->update();
         
@@ -1454,6 +1501,7 @@ public:
     }
 
     void correctPoses(){
+        //只有回环检测成功了,才会有这步修正位姿
     	if (aLoopIsClosed == true){
             recentCornerCloudKeyFrames. clear();
             recentSurfCloudKeyFrames.   clear();
@@ -1499,23 +1547,23 @@ public:
             if (timeLaserOdometry - timeLastProcessing >= mappingProcessInterval) {
 
                 timeLastProcessing = timeLaserOdometry;
-
+                //转换到map坐标系中
                 transformAssociateToMap();
-
+                //提取周围关键帧
                 extractSurroundingKeyFrames();
-
+                //降采样
                 downsampleCurrentScan();
-
+                //scan - map 之间的优化
                 scan2MapOptimization();
-
+                //关键帧保存
                 saveKeyFramesAndFactor();
-
+                //位姿矫正
                 correctPoses();
-
+                //发布坐标转换
                 publishTF();
-
+                //发布关键帧和姿态
                 publishKeyPosesAndFrames();
-
+                //去除点云
                 clearCloud();
             }
         }
@@ -1530,10 +1578,11 @@ int main(int argc, char** argv)
     ROS_INFO("\033[1;32m---->\033[0m Map Optimization Started.");
 
     mapOptimization MO;
-
+    //闭环检测与闭环功能    
     std::thread loopthread(&mapOptimization::loopClosureThread, &MO);
+    //将数据发布到ros中,主要用于可视化
     std::thread visualizeMapThread(&mapOptimization::visualizeGlobalMapThread, &MO);
-
+    //频率控制
     ros::Rate rate(200);
     while (ros::ok())
     {

@@ -177,7 +177,7 @@ public:
         transformMapped[5] = transformAftMapped[5] 
                            - (-sin(transformMapped[1]) * x2 + cos(transformMapped[1]) * z2);
     }
-
+    //将粗配准的里程计信息与精配准里程计信息融合计算,并在回调中发送最终的位姿
     void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr& laserOdometry)
     {
         currentHeader = laserOdometry->header;
@@ -214,7 +214,7 @@ public:
         laserOdometryTrans2.setOrigin(tf::Vector3(transformMapped[3], transformMapped[4], transformMapped[5]));
         tfBroadcaster2.sendTransform(laserOdometryTrans2);
     }
-
+    //获取精配准位姿 获取到的速度信息作为下次的先验输入
     void odomAftMappedHandler(const nav_msgs::Odometry::ConstPtr& odomAftMapped)
     {
         double roll, pitch, yaw;
@@ -239,6 +239,9 @@ public:
     }
 };
 
+//粗配准的里程计信息是FeatureAssociation发出的，
+//精配准的信息是mapOptimization发出的，均以200Hz的频率，
+//当odomAftMappedHandler收到精配准信息后更新位姿，这个位姿将在laserOdometryHandler收到下一条粗配准信息后综合计算再发出
 
 int main(int argc, char** argv)
 {
